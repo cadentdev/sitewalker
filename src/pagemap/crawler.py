@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import csv
+import ipaddress
+import socket
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -36,9 +38,34 @@ class CrawlingError(Exception):
     """Custom exception for crawling errors"""
     pass
 
+class SSRFProtectionError(Exception):
+    """Raised when a domain resolves to a private/reserved IP address."""
+    pass
+
+
+def validate_domain_ssrf(domain: str) -> None:
+    """Check that a domain does not resolve to a private or reserved IP.
+
+    Raises SSRFProtectionError if the domain resolves to loopback,
+    private, link-local, or reserved address ranges.
+    """
+    try:
+        results = socket.getaddrinfo(domain, None)
+        for family, _, _, _, sockaddr in results:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise SSRFProtectionError(
+                    f"Domain '{domain}' resolves to private/reserved IP {ip}. "
+                    f"Use --allow-private to override."
+                )
+    except socket.gaierror as e:
+        raise CrawlingError(f"Cannot resolve domain '{domain}': {e}")
+
 class WebsiteCrawler:
-    def __init__(self, domain: str):
+    def __init__(self, domain: str, timeout: int = 30, allow_private: bool = False):
         self.domain = domain
+        if not allow_private:
+            validate_domain_ssrf(domain)
         self.base_url = f"https://{domain}"
         # Normalize the base URL
         self.base_url, _ = self.process_url(self.base_url)
@@ -46,6 +73,7 @@ class WebsiteCrawler:
         self.results: List[Tuple[str, str, int]] = []
         self.external_links: Set[str] = set()
         self.pages_only: bool = False
+        self.timeout = timeout
         self.session = requests.Session()
         # Set a user agent to be more polite
         self.session.headers.update({
@@ -111,7 +139,8 @@ class WebsiteCrawler:
             logger.debug(f"Error checking if URL is page: {str(e)}")
             return False
 
-    def crawl(self, collect_external: bool = False, recursive: bool = False, pages_only: bool = False) -> None:
+    def crawl(self, collect_external: bool = False, recursive: bool = False,
+              pages_only: bool = False, max_pages: int = 1000, max_depth: int = 10) -> None:
         """
         Crawl the website starting from the base URL.
 
@@ -124,17 +153,26 @@ class WebsiteCrawler:
         - Continues until all reachable internal pages are visited
         """
         self.pages_only = pages_only
+        self.max_pages = max_pages
+        self.max_depth = max_depth
         logger.info(f"Starting crawl of {self.base_url}")
         logger.info(f"Mode: {'Recursive' if recursive else 'Single-level'} crawl, "
                    f"{'collecting' if collect_external else 'ignoring'} external links, "
-                   f"{'pages only' if pages_only else 'all files'}")
-        self._crawl_page(self.base_url, collect_external, recursive)
+                   f"{'pages only' if pages_only else 'all files'}, "
+                   f"max_pages={max_pages}, max_depth={max_depth}")
+        self._crawl_page(self.base_url, collect_external, recursive, depth=0)
         logger.info(f"Crawl complete. Visited {len(self.visited_urls)} pages")
         if collect_external:
             logger.info(f"Found {len(self.external_links)} unique external links")
 
-    def _crawl_page(self, url: str, collect_external: bool, recursive: bool) -> None:
+    def _crawl_page(self, url: str, collect_external: bool, recursive: bool, depth: int = 0) -> None:
         """Internal method to crawl a single page and process its links."""
+        if len(self.visited_urls) >= self.max_pages:
+            logger.info(f"Reached max_pages limit ({self.max_pages})")
+            return
+        if depth > self.max_depth:
+            logger.debug(f"Reached max_depth limit ({self.max_depth}) at {url}")
+            return
         try:
             clean_url, is_internal = self.process_url(url)
             if not is_internal or clean_url in self.visited_urls:
@@ -148,7 +186,7 @@ class WebsiteCrawler:
             self.visited_urls.add(clean_url)
             logger.debug(f"Crawling {clean_url}")
 
-            response = self.session.get(clean_url)
+            response = self.session.get(clean_url, timeout=self.timeout)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -164,7 +202,7 @@ class WebsiteCrawler:
 
                     if next_is_internal and recursive:
                         if next_clean_url not in self.visited_urls:
-                            self._crawl_page(next_clean_url, collect_external, recursive)
+                            self._crawl_page(next_clean_url, collect_external, recursive, depth + 1)
                     elif not next_is_internal and collect_external:
                         self.external_links.add(next_clean_url)
 
@@ -180,19 +218,35 @@ class WebsiteCrawler:
 
         time.sleep(1)  # Be polite
 
+    @staticmethod
+    def _sanitize_csv_value(value: str) -> str:
+        """Sanitize a value for safe CSV output.
+
+        Prevents CSV injection by prefixing dangerous characters that
+        spreadsheet applications interpret as formulas.
+        """
+        if isinstance(value, str) and value and value[0] in ('=', '+', '-', '@', '\t', '\r'):
+            return "'" + value
+        return value
+
     def save_results(self, output_file: str) -> None:
         """Save results to a CSV file."""
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['URL', 'Title', 'Status Code'])
-            writer.writerows(self.results)
+            for url, title, status in self.results:
+                writer.writerow([
+                    self._sanitize_csv_value(url),
+                    self._sanitize_csv_value(title),
+                    status
+                ])
         logger.info(f"Results saved to {output_file}")
 
     def save_external_links_results(self, filename: str) -> None:
         """Save external links to a CSV file."""
-        with open(filename, 'w', newline='') as csvfile:
+        with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(['External URL'])
             for url in sorted(self.external_links):
-                writer.writerow([url])
+                writer.writerow([self._sanitize_csv_value(url)])
         logger.info(f"External links saved to {filename}")

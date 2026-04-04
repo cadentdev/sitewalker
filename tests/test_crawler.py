@@ -1,5 +1,8 @@
 import pytest
-from src.pagemap.crawler import WebsiteCrawler, URLProcessingError
+from pagemap.crawler import (
+    WebsiteCrawler, URLProcessingError, SSRFProtectionError,
+    validate_domain_ssrf
+)
 import responses
 import tempfile
 import os
@@ -13,7 +16,7 @@ import logging
 @pytest.fixture
 def crawler_instance():
     """Fixture to create a WebsiteCrawler instance for testing."""
-    crawler = WebsiteCrawler("example.com")
+    crawler = WebsiteCrawler("example.com", allow_private=True)
     return crawler
 
 
@@ -603,7 +606,7 @@ def test_is_page_exception(crawler_instance, caplog):
     malformed_url = "http://[::1]:80"
     caplog.set_level(logging.DEBUG)
 
-    with patch('src.pagemap.crawler.urlparse',
+    with patch('pagemap.crawler.urlparse',
                side_effect=ValueError("Mock parsing error")):
         assert not crawler_instance.is_page(malformed_url)
 
@@ -620,3 +623,94 @@ def test_save_results_empty(crawler_instance, tmp_path):
     with open(output_file, 'r') as f:
         content = f.read()
         assert content.strip() == "URL,Title,Status Code"
+
+
+def test_ssrf_blocks_localhost():
+    """Test that SSRF protection blocks localhost."""
+    with pytest.raises(SSRFProtectionError, match="private/reserved IP"):
+        WebsiteCrawler("localhost")
+
+
+def test_ssrf_blocks_private_ip():
+    """Test that SSRF protection blocks private IPs."""
+    with patch('pagemap.crawler.socket.getaddrinfo',
+               return_value=[(2, 1, 6, '', ('192.168.1.1', 0))]):
+        with pytest.raises(SSRFProtectionError, match="private/reserved IP"):
+            WebsiteCrawler("evil.example.com")
+
+
+def test_ssrf_allow_private_override():
+    """Test that --allow-private bypasses SSRF protection."""
+    crawler = WebsiteCrawler("localhost", allow_private=True)
+    assert crawler.domain == "localhost"
+
+
+def test_timeout_passed_to_requests():
+    """Test that timeout is passed to session.get."""
+    crawler = WebsiteCrawler("example.com", timeout=5)
+    assert crawler.timeout == 5
+
+
+@responses.activate
+def test_max_pages_limit():
+    """Test that crawling stops at max_pages limit."""
+    crawler = WebsiteCrawler("example.com")
+
+    responses.add(responses.GET, 'https://example.com',
+        body='<html><head><title>Home</title></head><body>'
+             '<a href="https://example.com/p1">1</a>'
+             '<a href="https://example.com/p2">2</a>'
+             '</body></html>', status=200)
+    responses.add(responses.GET, 'https://example.com/p1',
+        body='<html><head><title>P1</title></head></html>', status=200)
+    responses.add(responses.GET, 'https://example.com/p2',
+        body='<html><head><title>P2</title></head></html>', status=200)
+
+    crawler.crawl(recursive=True, max_pages=2)
+    assert len(crawler.visited_urls) <= 2
+
+
+@responses.activate
+def test_max_depth_limit():
+    """Test that crawling stops at max_depth limit."""
+    crawler = WebsiteCrawler("example.com")
+
+    responses.add(responses.GET, 'https://example.com',
+        body='<html><head><title>D0</title></head><body>'
+             '<a href="https://example.com/d1">D1</a></body></html>', status=200)
+    responses.add(responses.GET, 'https://example.com/d1',
+        body='<html><head><title>D1</title></head><body>'
+             '<a href="https://example.com/d2">D2</a></body></html>', status=200)
+    responses.add(responses.GET, 'https://example.com/d2',
+        body='<html><head><title>D2</title></head><body></body></html>', status=200)
+
+    crawler.crawl(recursive=True, max_depth=1)
+    # depth 0 = base, depth 1 = d1, depth 2 = d2 (blocked)
+    assert 'https://example.com' in crawler.visited_urls
+    assert 'https://example.com/d1' in crawler.visited_urls
+    assert 'https://example.com/d2' not in crawler.visited_urls
+
+
+def test_csv_sanitization():
+    """Test that CSV injection characters are sanitized."""
+    crawler = WebsiteCrawler("example.com")
+    assert crawler._sanitize_csv_value("=cmd|'/C calc'!A0") == "'=cmd|'/C calc'!A0"
+    assert crawler._sanitize_csv_value("+cmd") == "'+cmd"
+    assert crawler._sanitize_csv_value("-cmd") == "'-cmd"
+    assert crawler._sanitize_csv_value("@sum") == "'@sum"
+    assert crawler._sanitize_csv_value("Normal title") == "Normal title"
+    assert crawler._sanitize_csv_value("") == ""
+
+
+def test_csv_sanitization_in_output(tmp_path):
+    """Test that saved CSV files have sanitized values."""
+    crawler = WebsiteCrawler("example.com")
+    crawler.results = [
+        ("https://example.com", "=HYPERLINK('evil')", 200),
+    ]
+    output_file = tmp_path / "results.csv"
+    crawler.save_results(str(output_file))
+
+    with open(output_file, 'r') as f:
+        content = f.read()
+        assert "'=HYPERLINK('evil')" in content
