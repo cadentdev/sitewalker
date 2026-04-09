@@ -289,7 +289,7 @@ class WebsiteCrawler:
     def save_results(self, output_file: str) -> None:
         """Save results to a CSV file."""
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
+            writer = csv.writer(f, lineterminator='\n')
             writer.writerow(['URL', 'Title', 'Status Code'])
             for url, title, status in self.results:
                 writer.writerow([
@@ -302,7 +302,7 @@ class WebsiteCrawler:
     def save_external_links_results(self, filename: str) -> None:
         """Save external links to a CSV file."""
         with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.writer(csvfile)
+            writer = csv.writer(csvfile, lineterminator='\n')
             writer.writerow(['External URL'])
             for url in sorted(self.external_links):
                 writer.writerow([self._sanitize_csv_value(url)])

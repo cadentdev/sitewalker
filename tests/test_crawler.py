@@ -785,6 +785,31 @@ def test_ignore_robots_flag():
     assert 'https://example.com/secret/page' in crawler.visited_urls
 
 
+def test_save_results_unix_line_endings(tmp_path):
+    """Test that saved CSV uses Unix line endings (no \\r)."""
+    crawler = WebsiteCrawler("example.com")
+    crawler.results = [
+        ("https://example.com", "Home Page", 200),
+        ("https://example.com/about", "About Us", 200),
+    ]
+    output_file = tmp_path / "results.csv"
+    crawler.save_results(str(output_file))
+
+    raw = output_file.read_bytes()
+    assert b'\r' not in raw, f"Found \\r in CSV output: {raw[:200]}"
+
+
+def test_save_external_links_unix_line_endings(tmp_path):
+    """Test that saved external links CSV uses Unix line endings (no \\r)."""
+    crawler = WebsiteCrawler("example.com")
+    crawler.external_links = {"https://external1.com", "https://external2.com"}
+    output_file = tmp_path / "external.csv"
+    crawler.save_external_links_results(str(output_file))
+
+    raw = output_file.read_bytes()
+    assert b'\r' not in raw, f"Found \\r in CSV output: {raw[:200]}"
+
+
 @responses.activate
 def test_robots_txt_missing_gracefully():
     """Test that a missing robots.txt doesn't block crawling."""
