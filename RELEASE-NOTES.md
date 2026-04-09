@@ -1,5 +1,20 @@
 # Release Notes
 
+## v0.3.1 (2026-04-09)
+
+### Features
+
+- **`--delay` flag** — Configurable delay between requests (default 1.0s). Use `--delay 0` for local servers where rate limiting isn't needed. Crawling localhost went from ~83 minutes to ~10 minutes for 3305 pages.
+
+### Infrastructure
+
+- **GitHub Actions CI** — Automated pytest + bandit on every push and PR. Python 3.9 and 3.12 matrix. Enforces 95% coverage threshold.
+
+### Quality
+
+- 51 tests, 96% coverage, bandit clean
+- CI verified on both Python 3.9 and 3.12
+
 ## v0.3.0 (2026-04-09)
 
 Three features and two security fixes addressing all four open issues.
