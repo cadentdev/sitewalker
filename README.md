@@ -20,6 +20,9 @@ sitewalker example.com -r
 # Collect external links
 sitewalker example.com -e
 
+# Collect external links and check their HTTP status
+sitewalker example.com -e --check-external
+
 # Recursive crawl with external link collection
 sitewalker example.com -r -e
 
@@ -41,6 +44,7 @@ The target accepts a bare domain (`example.com`) or a full URL (`http://example.
 |------|-------------|---------|
 | `-r`, `--recursive` | Recursively crawl internal links | Off |
 | `-e`, `--external-links` | Collect external links | Off |
+| `--check-external` | Check HTTP status of external links (requires `-e`) | Off |
 | `-p`, `--pages` | Only crawl web pages (HTML, PHP, etc.) | Off |
 | `-v`, `--verbose` | Enable verbose/debug output | Off |
 | `-t`, `--timeout` | Request timeout in seconds | 30 |
@@ -57,7 +61,7 @@ Results are saved to a CSV file named `{domain}_{timestamp}.csv` with columns:
 - **Title** — the page's `<title>` tag content
 - **Status Code** — HTTP response status
 
-When using `-e`, external links are additionally saved to `{domain}_{timestamp}_external_links.csv`. The internal pages CSV is always generated.
+When using `-e`, external links are additionally saved to `{domain}_{timestamp}_external_links.csv`. The internal pages CSV is always generated. With `--check-external`, the external links CSV includes a Status Code column.
 
 ## Security
 
@@ -69,7 +73,6 @@ When using `-e`, external links are additionally saved to `{domain}_{timestamp}_
 ## Roadmap
 
 - `--format json` — JSON output format
-- `--check-links` — broken link detection
 - `--images --check-alt` — image inventory with alt text auditing
 
 ## License
