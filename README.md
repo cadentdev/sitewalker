@@ -45,7 +45,7 @@ The target accepts a bare domain (`example.com`) or a full URL (`http://example.
 | `-v`, `--verbose` | Enable verbose/debug output | Off |
 | `-t`, `--timeout` | Request timeout in seconds | 30 |
 | `--max-pages` | Maximum number of pages to crawl | 1000 |
-| `--max-depth` | Maximum crawl depth for recursive mode | 10 |
+| `--max-depth` | Maximum link distance from start URL (BFS) | 10 |
 | `--allow-private` | Allow crawling domains that resolve to private IPs | Off |
 | `--ignore-robots` | Ignore robots.txt rules | Off |
 
