@@ -57,7 +57,7 @@ Results are saved to a CSV file named `{domain}_{timestamp}.csv` with columns:
 - **Title** — the page's `<title>` tag content
 - **Status Code** — HTTP response status
 
-When using `-e`, external links are saved to a separate `{domain}_{timestamp}_external_links.csv`.
+When using `-e`, external links are additionally saved to `{domain}_{timestamp}_external_links.csv`. The internal pages CSV is always generated.
 
 ## Security
 
